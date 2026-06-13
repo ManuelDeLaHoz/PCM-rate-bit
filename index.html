@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PCM, Espectro CTFT y Tabla de Cuantización</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --panel: #1e293b;
+            --text: #f8fafc;
+            --text-muted: #94a3b8;
+            --accent: #3b82f6;
+            --grid: #334155;
+            --signal: #94a3b8;
+            --sample: #ef4444;
+            --quant: #10b981;
+            --code: #f59e0b;
+            --spectrum: #8b5cf6;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            height: 100vh;
+            width: 100vw;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            background-color: var(--panel);
+            padding: 10px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid var(--grid);
+            flex-shrink: 0;
+            height: 70px;
+        }
+
+        .title h1 { font-size: 1.3rem; }
+        .title p { font-size: 0.85rem; color: #cbd5e1; }
+
+        .formula-box {
+            background-color: #000;
+            padding: 8px 20px;
+            border-radius: 6px;
+            border: 1px solid var(--accent);
+            font-family: monospace;
+            font-size: 1.4rem;
+            color: var(--accent);
+            font-weight: bold;
+        }
+
+        #toolbar {
+            display: flex;
+            padding: 10px 20px;
+            gap: 20px;
+            background-color: var(--bg);
+            border-bottom: 1px solid var(--grid);
+            flex-shrink: 0;
+            height: 60px;
+            align-items: center;
+        }
+
+        .control-group {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .control-group label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.9rem;
+            font-weight: 600;
+            margin-bottom: 3px;
+        }
+
+        input[type="range"] { cursor: pointer; }
+
+        .warning {
+            color: #ef4444;
+            font-weight: bold;
+            font-size: 0.9rem;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        #main-layout {
+            flex: 1;
+            display: flex;
+            flex-direction: row;
+            overflow: hidden;
+            background-color: var(--bg);
+        }
+
+        #grid-container {
+            flex: 1;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: 1fr 1fr;
+            gap: 12px;
+            padding: 12px;
+            overflow: hidden;
+        }
+
+        .graph-wrapper {
+            background-color: var(--panel);
+            border: 1px solid var(--grid);
+            border-radius: 8px;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .graph-title {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(15, 23, 42, 0.85);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: bold;
+            border: 1px solid var(--grid);
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        #sidebar {
+            width: 320px;
+            background-color: var(--panel);
+            border-left: 2px solid var(--grid);
+            display: flex;
+            flex-direction: column;
+            padding: 15px;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+
+        #sidebar h2 {
+            font-size: 1rem;
+            margin-bottom: 5px;
+            color: var(--text);
+            border-bottom: 1px solid var(--grid);
+            padding-bottom: 5px;
+        }
+
+        #sidebar p {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-bottom: 10px;
+        }
+
+        .table-scroll {
+            flex: 1;
+            overflow-y: auto;
+            border: 1px solid var(--grid);
+            border-radius: 6px;
+            background-color: var(--bg);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+        }
+
+        th, td {
+            padding: 8px;
+            text-align: center;
+            border-bottom: 1px solid var(--grid);
+        }
+
+        th {
+            background-color: var(--panel);
+            color: var(--text-muted);
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+            z-index: 2;
+        }
+
+        tr.active-level {
+            background-color: rgba(59, 130, 246, 0.25) !important;
+            outline: 1px solid var(--accent);
+        }
+
+        tr:nth-child(even) {
+            background-color: rgba(255, 255, 255, 0.02);
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="title">
+            <h1>Sistema PCM Interactivo Completo</h1>
+            <p>Señal base en t = 1 segundo | Ancho de Banda (f_max) = 2 Hz</p>
+        </div>
+        <div class="formula-box" id="formulaDisplay">Rb = 0 × 0 = 0 bps</div>
+    </header>
+
+    <div id="toolbar">
+        <div class="control-group">
+            <label>
+                <span>Frecuencia de Muestreo (fs)</span>
+                <span id="fsVal">10 Hz</span>
+            </label>
+            <input type="range" id="fsSlider" min="2" max="24" step="1" value="10">
+        </div>
+        <div class="control-group">
+            <label>
+                <span>Resolución Binaria (n bits)</span>
+                <span id="nVal">2 bits (4 niveles)</span>
+            </label>
+            <input type="range" id="nSlider" min="1" max="5" step="1" value="2">
+        </div>
+        <div class="warning" id="aliasingWarn">⚠️ ALIASING DETECTADO (fs < 4 Hz)</div>
+    </div>
+
+    <div id="main-layout">
+        <div id="grid-container">
+            <div class="graph-wrapper">
+                <div class="graph-title">1. Muestreo (fs = <span class="fs-text"></span> Hz)</div>
+                <canvas id="c1"></canvas>
+            </div>
+            <div class="graph-wrapper">
+                <div class="graph-title">2. Cuantización Estándar (L = <span class="l-text"></span>)</div>
+                <canvas id="c2"></canvas>
+            </div>
+            <div class="graph-wrapper">
+                <div class="graph-title">3. Codificación Lineal NRZ (Rb = <span class="rb-text"></span> bps)</div>
+                <canvas id="c3"></canvas>
+            </div>
+            <div class="graph-wrapper">
+                <div class="graph-title">4. Espectro CTFT (Nyquist: fs ≥ 2·f_max)</div>
+                <canvas id="c4"></canvas>
+            </div>
+        </div>
+
+        <div id="sidebar">
+            <h2>Mapeo de Niveles PCM</h2>
+            <p>Relación dinámica entre códigos binarios, nivel decimal y voltajes centrales asignados.</p>
+            <div class="table-scroll">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Código</th>
+                            <th>Nivel</th>
+                            <th>Voltaje</th>
+                        </tr>
+                    </thead>
+                    <tbody id="quantTableBody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const fsSlider = document.getElementById('fsSlider');
+        const nSlider = document.getElementById('nSlider');
+        const fsVal = document.getElementById('fsVal');
+        const nVal = document.getElementById('nVal');
+        const formulaDisplay = document.getElementById('formulaDisplay');
+        const aliasingWarn = document.getElementById('aliasingWarn');
+        const tableBody = document.getElementById('quantTableBody');
+
+        const canvases = [
+            document.getElementById('c1'), document.getElementById('c2'),
+            document.getElementById('c3'), document.getElementById('c4')
+        ];
+        const ctxs = canvases.map(c => c.getContext('2d'));
+
+        const B = 2; 
+
+        let hoveredTime = null;
+        let hoveredCanvasIdx = null;
+
+        function signal(t) {
+            return 0.5 * Math.sin(2 * Math.PI * 1 * t) + 0.5 * Math.sin(2 * Math.PI * B * t);
+        }
+
+        function resize() {
+            canvases.forEach(c => {
+                const rect = c.parentElement.getBoundingClientRect();
+                c.width = rect.width;
+                c.height = rect.height;
+            });
+            draw();
+        }
+
+        window.addEventListener('resize', resize);
+        fsSlider.addEventListener('input', draw);
+        nSlider.addEventListener('input', draw);
+
+        [0, 1, 2].forEach(idx => {
+            const c = canvases[idx];
+            c.addEventListener('mousemove', (e) => {
+                const rect = c.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const fs = parseInt(fsSlider.value);
+                
+                let t = mouseX / rect.width;
+                if (t < 0) t = 0;
+                if (t >= 1) t = 0.9999; 
+
+                // ¡CORRECCIÓN CRÍTICA AQUÍ! (Math.floor sincroniza con la escalera retenida)
+                const activeSampleIdx = Math.floor(t * fs);
+                hoveredTime = activeSampleIdx / fs;
+                hoveredCanvasIdx = idx;
+                draw();
+            });
+
+            c.addEventListener('mouseleave', () => {
+                hoveredTime = null;
+                hoveredCanvasIdx = null;
+                draw();
+            });
+        });
+
+        function draw() {
+            const fs = parseInt(fsSlider.value);
+            const n = parseInt(nSlider.value);
+            const L = Math.pow(2, n);
+            const Rb = fs * n;
+
+            fsVal.innerText = `${fs} Hz`;
+            nVal.innerText = `${n} bits (${L} niveles)`;
+            formulaDisplay.innerText = `Rb = ${fs} × ${n} = ${Rb} bps`;
+            
+            document.querySelectorAll('.fs-text').forEach(e => e.innerText = fs);
+            document.querySelectorAll('.l-text').forEach(e => e.innerText = L);
+            document.querySelectorAll('.rb-text').forEach(e => e.innerText = Rb);
+
+            aliasingWarn.style.opacity = (fs < 2 * B) ? 1 : 0;
+            if (canvases[0].width === 0) return;
+
+            let activeLevelIndex = -1;
+            const stepValue = 2 / L; // Cuantización Uniforme Estándar (USM)
+
+            if (hoveredTime !== null) {
+                const vAnalog = signal(hoveredTime);
+                let minDiff = Infinity;
+                for (let j = 0; j < L; j++) {
+                    let levelVal = -1 + (j + 0.5) * stepValue;
+                    let diff = Math.abs(vAnalog - levelVal);
+                    if (diff < minDiff) {
+                        minDiff = diff;
+                        activeLevelIndex = j;
+                    }
+                }
+            }
+
+            buildTable(n, L, stepValue, activeLevelIndex);
+
+            drawMuestreo(fs);
+            drawCuantizacion(fs, L);
+            drawCodificacion(fs, n, L);
+            drawCTFT(fs);
+        }
+
+        function buildTable(n, L, stepValue, activeLevelIndex) {
+            tableBody.innerHTML = '';
+            for (let j = L - 1; j >= 0; j--) {
+                const tr = document.createElement('tr');
+                if (j === activeLevelIndex) {
+                    tr.classList.add('active-level');
+                }
+
+                const tdBin = document.createElement('td');
+                tdBin.innerText = j.toString(2).padStart(n, '0');
+                tdBin.style.color = 'var(--code)';
+                tdBin.style.fontFamily = 'monospace';
+                tdBin.style.fontWeight = 'bold';
+
+                const tdLvl = document.createElement('td');
+                tdLvl.innerText = j;
+                tdLvl.style.color = 'var(--quant)';
+
+                const tdVal = document.createElement('td');
+                const voltage = -1 + (j + 0.5) * stepValue; // Voltaje central del intervalo
+                tdVal.innerText = `${voltage.toFixed(2)} V`;
+
+                tr.appendChild(tdBin);
+                tr.appendChild(tdLvl);
+                tr.appendChild(tdVal);
+                tableBody.appendChild(tr);
+            }
+        }
+
+        function drawTooltip(ctx, textLines, mouseX, canvasW, canvasH) {
+            ctx.font = '11px monospace';
+            let maxW = 0;
+            textLines.forEach(l => {
+                let w = ctx.measureText(l).width;
+                if (w > maxW) maxW = w;
+            });
+
+            const boxW = maxW + 16;
+            const boxH = textLines.length * 16 + 10;
+            
+            let boxX = mouseX + 12;
+            if (boxX + boxW > canvasW) boxX = mouseX - boxW - 12;
+            let boxY = 38;
+
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
+            ctx.strokeStyle = 'var(--accent)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.roundRect(boxX, boxY, boxW, boxH, 5);
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.fillStyle = '#fff';
+            textLines.forEach((l, idx) => {
+                ctx.fillText(l, boxX + 8, boxY + 16 + (idx * 16));
+            });
+        }
+
+        function drawCrosshair(ctx, x, h) {
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([3, 3]);
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, h);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+
+        function drawMuestreo(fs) {
+            const c = canvases[0]; const ctx = ctxs[0];
+            const w = c.width; const h = c.height;
+            const centerY = h / 2; const amp = (h / 2) * 0.75;
+
+            ctx.clearRect(0, 0, w, h);
+            dibujarEjes(ctx, w, h, "Tiempo (t = 1s)");
+
+            ctx.strokeStyle = '#64748b'; ctx.lineWidth = 2;
+            ctx.beginPath();
+            for(let px = 0; px <= w; px++) {
+                let y = centerY - signal(px / w) * amp;
+                if(px === 0) ctx.moveTo(px, y); else ctx.lineTo(px, y);
+            }
+            ctx.stroke();
+
+            ctx.fillStyle = '#ef4444'; ctx.strokeStyle = 'rgba(239, 68, 68, 0.5)'; ctx.lineWidth = 2;
+            for(let i = 0; i <= fs; i++) {
+                let px = (i / fs) * w;
+                let y = centerY - signal(i / fs) * amp;
+                ctx.beginPath(); ctx.moveTo(px, centerY); ctx.lineTo(px, y); ctx.stroke();
+                ctx.beginPath(); ctx.arc(px, y, 4, 0, Math.PI * 2); ctx.fill();
+            }
+
+            if (hoveredTime !== null) {
+                const px = hoveredTime * w;
+                drawCrosshair(ctx, px, h);
+                const vAnalog = signal(hoveredTime);
+                const y = centerY - vAnalog * amp;
+                
+                ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5;
+                ctx.beginPath(); ctx.arc(px, y, 6, 0, Math.PI*2); ctx.stroke();
+
+                if (hoveredCanvasIdx === 0) {
+                    drawTooltip(ctx, [
+                        `TIEMPO : ${hoveredTime.toFixed(3)} s`,
+                        `V.REAL : ${vAnalog.toFixed(3)} V`,
+                        `MUESTRA: #${Math.round(hoveredTime * fs)}`
+                    ], px, w, h);
+                }
+            }
+        }
+
+        function drawCuantizacion(fs, L) {
+            const c = canvases[1]; const ctx = ctxs[1];
+            const w = c.width; const h = c.height;
+            const centerY = h / 2; const amp = (h / 2) * 0.75;
+            
+            // FÓRMULA CORREGIDA: L intervalos iguales exactos.
+            const stepY = (2 * amp) / L; 
+
+            ctx.clearRect(0, 0, w, h);
+            dibujarEjes(ctx, w, h, "Tiempo (t = 1s)");
+
+            // Dibujar las lineas divisorias (bordes de los intervalos)
+            ctx.strokeStyle = '#334155'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
+            for(let i = 0; i <= L; i++) {
+                let y = centerY + amp - (i * stepY);
+                ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+            }
+            ctx.setLineDash([]);
+
+            // Calcular las alturas reales de los niveles (puntos medios)
+            const nivelesY = [];
+            for(let j = 0; j < L; j++) {
+                nivelesY.push(centerY + amp - (j + 0.5) * stepY);
+            }
+
+            // Dibujar escalera
+            ctx.strokeStyle = '#10b981'; ctx.lineWidth = 3; ctx.beginPath();
+            let prevY = null;
+            for(let i = 0; i <= fs; i++) {
+                let px = (i / fs) * w;
+                let analogY = centerY - signal(i / fs) * amp;
+                
+                let closestY = nivelesY[0];
+                let minDiff = Math.abs(analogY - closestY);
+                for(let j = 1; j < L; j++) {
+                    let diff = Math.abs(analogY - nivelesY[j]);
+                    if(diff < minDiff) { minDiff = diff; closestY = nivelesY[j]; }
+                }
+
+                if(i === 0) ctx.moveTo(px, closestY);
+                else { ctx.lineTo(px, prevY); ctx.lineTo(px, closestY); }
+                prevY = closestY;
+                
+                ctx.fillStyle = '#10b981'; ctx.fillRect(px - 3, closestY - 3, 6, 6);
+            }
+            ctx.lineTo(w, prevY); ctx.stroke();
+
+            if (hoveredTime !== null) {
+                // Ahora hoveredTime SIEMPRE coincide con el inicio de la muestra, el texto no se adelantará.
+                let analogY = centerY - signal(hoveredTime) * amp;
+                
+                let closestY = nivelesY[0]; let levelIdx = 0;
+                let minDiff = Math.abs(analogY - closestY);
+                for(let j = 1; j < L; j++) {
+                    let diff = Math.abs(analogY - nivelesY[j]);
+                    if(diff < minDiff) { minDiff = diff; closestY = nivelesY[j]; levelIdx = j; }
+                }
+
+                const startPx = hoveredTime * w;
+                const endPx = (hoveredTime + 1/fs) * w;
+                ctx.fillStyle = 'rgba(16, 185, 129, 0.15)';
+                ctx.fillRect(startPx, 0, endPx - startPx, h);
+
+                drawCrosshair(ctx, startPx + (endPx-startPx)/2, h);
+                ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(startPx, closestY, 5, 0, Math.PI*2); ctx.fill();
+
+                if (hoveredCanvasIdx === 1) {
+                    const bits = parseInt(nSlider.value);
+                    const volts = -1 + (levelIdx + 0.5) * (2 / L);
+                    drawTooltip(ctx, [
+                        `INTERVALO: Muestra #${Math.round(hoveredTime * fs)}`,
+                        `NIVEL    : ${levelIdx}`,
+                        `VOLTS    : ${volts.toFixed(2)} V`,
+                        `CÓDIGO   : ${levelIdx.toString(2).padStart(bits, '0')}`
+                    ], startPx + (endPx-startPx)/2, w, h);
+                }
+            }
+        }
+
+        function drawCodificacion(fs, n, L) {
+            const c = canvases[2]; const ctx = ctxs[2];
+            const w = c.width; const h = c.height;
+            const centerY = h / 2; const amp = h * 0.28;
+
+            ctx.clearRect(0, 0, w, h);
+            dibujarEjes(ctx, w, h, "Tren de Bits Electrónico (NRZ)");
+
+            let binaryStream = "";
+            const stepValue = 2 / L;
+            const sampleInfoMap = []; 
+
+            for(let i = 0; i < fs; i++) {
+                let val = signal(i / fs);
+                let closestIndex = 0; let minDiff = Infinity;
+                for(let j = 0; j < L; j++) {
+                    let diff = Math.abs(val - (-1 + (j + 0.5) * stepValue));
+                    if(diff < minDiff) { minDiff = diff; closestIndex = j; }
+                }
+                let binStr = closestIndex.toString(2).padStart(n, '0');
+                binaryStream += binStr;
+                sampleInfoMap.push(binStr);
+            }
+
+            const totalBits = binaryStream.length;
+            const pxPerBit = w / totalBits;
+
+            ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 3; ctx.beginPath();
+            for(let i = 0; i < totalBits; i++) {
+                let bit = binaryStream[i];
+                let px = i * pxPerBit;
+                let nextPx = (i + 1) * pxPerBit;
+                let y = bit === '1' ? centerY - amp : centerY + amp;
+
+                if(i === 0) ctx.moveTo(px, y);
+                else {
+                    let prevY = binaryStream[i-1] === '1' ? centerY - amp : centerY + amp;
+                    if(y !== prevY) ctx.lineTo(px, y);
+                }
+                ctx.lineTo(nextPx, y);
+            }
+            ctx.stroke();
+
+            for(let i = 0; i < fs; i++) {
+                let pxStart = (i * n) * pxPerBit;
+                let pxEnd = ((i + 1) * n) * pxPerBit;
+                
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+                ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
+                ctx.beginPath(); ctx.moveTo(pxStart, 0); ctx.lineTo(pxStart, h); ctx.stroke();
+                ctx.setLineDash([]);
+                
+                if (fs <= 18) { 
+                    ctx.fillStyle = 'rgba(245, 158, 11, 0.8)'; 
+                    ctx.font = 'bold 13px monospace';
+                    let textStr = sampleInfoMap[i];
+                    let textW = ctx.measureText(textStr).width;
+                    ctx.fillText(textStr, (pxStart + pxEnd)/2 - textW/2, h - 8);
+                }
+            }
+
+            if (hoveredTime !== null) {
+                const sampleIdx = Math.round(hoveredTime * fs);
+                const startPx = (sampleIdx * n) * pxPerBit;
+                const endPx = ((sampleIdx + 1) * n) * pxPerBit;
+                const midPx = (startPx + endPx) / 2;
+
+                ctx.fillStyle = 'rgba(245, 158, 11, 0.15)';
+                ctx.fillRect(startPx, 0, endPx - startPx, h);
+
+                drawCrosshair(ctx, midPx, h);
+
+                if (hoveredCanvasIdx === 2 && sampleIdx >= 0) {
+                    drawTooltip(ctx, [
+                        `MUESTRA: #${sampleIdx}`,
+                        `PAQUETE: ${sampleInfoMap[sampleIdx]}`,
+                        `TAMAÑO : ${n} bits`
+                    ], midPx, w, h);
+                }
+            }
+        }
+
+        function drawCTFT(fs) {
+            const c = canvases[3]; const ctx = ctxs[3];
+            const w = c.width; const h = c.height;
+            const centerY = h - 35; const amp = h * 0.55;
+
+            ctx.clearRect(0, 0, w, h);
+            
+            const maxF = 25;
+            const freqToPx = (f) => w / 2 + (f / maxF) * (w / 2);
+
+            ctx.strokeStyle = '#475569'; ctx.lineWidth = 2; ctx.beginPath();
+            ctx.moveTo(0, centerY); ctx.lineTo(w, centerY); ctx.stroke();
+            
+            ctx.fillStyle = '#94a3b8'; ctx.font = '11px sans-serif';
+            ctx.fillText("0 Hz", freqToPx(0) - 10, centerY + 16);
+            ctx.fillText("Frecuencia (f)", w - 85, centerY + 16);
+
+            function drawTriangle(centerF, color, label) {
+                const pL = freqToPx(centerF - B);
+                const pC = freqToPx(centerF);
+                const pR = freqToPx(centerF + B);
+
+                ctx.fillStyle = color; ctx.beginPath();
+                ctx.moveTo(pL, centerY); ctx.lineTo(pC, centerY - amp); ctx.lineTo(pR, centerY);
+                ctx.closePath(); ctx.fill();
+
+                ctx.strokeStyle = color.replace(/[^,]+(?=\))/, '1'); ctx.lineWidth = 1.5; ctx.stroke();
+
+                if(label) {
+                    ctx.fillStyle = '#fff'; ctx.fillText("B", pR + 4, centerY - 8);
+                    ctx.strokeStyle = '#fff'; ctx.setLineDash([3,3]);
+                    ctx.beginPath(); ctx.moveTo(pR, centerY); ctx.lineTo(pR, centerY - amp/2); ctx.stroke();
+                    ctx.setLineDash([]);
+                }
+            }
+
+            const isAliasing = fs < 2 * B;
+            const replicaColor = isAliasing ? 'rgba(239, 68, 68, 0.45)' : 'rgba(139, 92, 246, 0.4)';
+
+            for(let k = -3; k <= 3; k++) {
+                if(k !== 0) {
+                    drawTriangle(k * fs, replicaColor, false);
+                    if(k === 1) {
+                        ctx.fillStyle = '#8b5cf6'; ctx.fillText(`fs (${fs}Hz)`, freqToPx(fs) - 15, centerY + 28);
+                        ctx.beginPath(); ctx.moveTo(freqToPx(fs), centerY); ctx.lineTo(freqToPx(fs), centerY+12); ctx.stroke();
+                    }
+                }
+            }
+
+            drawTriangle(0, 'rgba(59, 130, 246, 0.75)', true);
+
+            if(isAliasing) {
+                ctx.fillStyle = '#ef4444'; ctx.font = 'bold 16px sans-serif';
+                ctx.fillText("¡ZONA DE ALIASING!", 15, 45);
+            }
+        }
+
+        function dibujarEjes(ctx, w, h, labelX) {
+            const centerY = h / 2;
+            ctx.strokeStyle = '#475569'; ctx.lineWidth = 1.5; ctx.beginPath();
+            ctx.moveTo(0, centerY); ctx.lineTo(w, centerY); ctx.stroke();
+            ctx.fillStyle = '#94a3b8'; ctx.font = '11px sans-serif';
+            ctx.fillText(labelX, w - 100, centerY + 14);
+        }
+
+        window.addEventListener('load', () => {
+            setTimeout(() => { resize(); }, 60);
+        });
+    </script>
+</body>
+</html>
